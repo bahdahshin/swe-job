@@ -48,6 +48,7 @@ let refreshRunning = false; // only guards this instance; another instance could
 // Streams newline-delimited JSON: {type:"progress",message} lines, then {type:"done",fetch} or {type:"error",error}.
 async function streamRefresh(req, res) {
   if (refreshRunning) return sendJson(res, 409, { error: "A fetch is already running" });
+  if (store.saveBlocker) return sendJson(res, 503, { error: store.saveBlocker }); // don't spend minutes fetching what can't be saved
   refreshRunning = true;
   res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
   const send = (event) => {
