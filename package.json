@@ -1,0 +1,14 @@
+{
+  "name": "swe-job-market",
+  "version": "1.0.0",
+  "description": "Dashboard of software engineer job posts, salary and years of experience",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "fetch": "node scripts/fetch-jobs.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "wreq-js": "^3.2.0"
+  }
+}

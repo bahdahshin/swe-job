@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SWE Job Market</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <h1>Software Engineer Job Market</h1>
+        <p class="sub">Job posts, salary and years of experience required</p>
+      </div>
+      <div class="head-actions">
+        <div class="head-row">
+          <label class="fetch-picker">HiringCafe fetch
+            <select id="fetch-select" aria-label="Saved fetch to show"><option>Loading…</option></select>
+          </label>
+          <button id="refresh" type="button">Fetch now</button>
+        </div>
+        <div id="refresh-status" class="refresh-status" role="status" aria-live="polite"></div>
+      </div>
+    </header>
+
+    <section class="filters" aria-label="Filters">
+      <label>Level <select id="f-level"><option value="">All levels</option></select></label>
+      <label>Location <select id="f-location"><option value="">All locations</option></select></label>
+      <label>Specialty <select id="f-specialty"><option value="">All specialties</option></select></label>
+      <label>Posted
+        <select id="f-days">
+          <option value="0">Any time</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </label>
+      <button id="f-reset" class="ghost" type="button">Reset</button>
+    </section>
+
+    <section class="tiles">
+      <div class="tile"><div class="tile-label">Job posts</div><div class="tile-value" id="k-count">–</div></div>
+      <div class="tile"><div class="tile-label">Median salary</div><div class="tile-value" id="k-salary">–</div><div class="tile-note" id="k-salary-range"></div></div>
+      <div class="tile"><div class="tile-label">Median years of experience</div><div class="tile-value" id="k-years">–</div><div class="tile-note" id="k-years-range"></div></div>
+    </section>
+
+    <section class="grid">
+      <figure class="card">
+        <figcaption><h2>Job posts by years of experience required</h2></figcaption>
+        <div class="chart" id="chart-years"></div>
+      </figure>
+      <figure class="card">
+        <figcaption>
+          <h2>Salary by years of experience</h2>
+          <div class="legend">
+            <span><i class="swatch line"></i>Median</span>
+            <span><i class="swatch band"></i>25th–75th percentile</span>
+          </div>
+        </figcaption>
+        <div class="chart" id="chart-salary"></div>
+      </figure>
+    </section>
+
+    <figure class="card">
+      <figcaption><h2>By location</h2></figcaption>
+      <div id="chart-location" class="loc-list"></div>
+    </figure>
+
+    <section class="card">
+      <div class="table-head">
+        <h2>Job posts</h2>
+        <input id="search" type="search" placeholder="Search title or company…" />
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="title">Title</th>
+              <th data-sort="company">Company</th>
+              <th data-sort="location">Location</th>
+              <th data-sort="yearsExperience" class="num">Years exp</th>
+              <th data-sort="salaryMid" class="num">Salary</th>
+              <th data-sort="postedDate" class="num">Posted</th>
+              <th>Job post</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="table-foot"><span id="row-info"></span><button id="more" class="ghost" type="button">Show more</button></div>
+    </section>
+
+    <footer class="page-foot" id="sources"></footer>
+  </main>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
