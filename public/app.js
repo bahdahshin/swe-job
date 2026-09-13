@@ -40,38 +40,34 @@ async function getJson(url) {
   return body;
 }
 
-// The default (newest complete) fetch. The server answers 503 while its first fetch is still running.
-async function loadDefaultJobs() {
-  for (;;) {
-    try {
-      return await getJson("/api/jobs");
-    } catch (err) {
-      if (err.status !== 503) throw err;
-      showRefreshStatus("Fetching postings from HiringCafe…");
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-  }
-}
-
 // ---- fetch history -----------------------------------------------------------
 
 let fetchIndex = { defaultId: null, fetches: [] };
 
-async function loadFetchList() {
+// `justSaved` is a summary returned by a fetch that just finished: Blob listings can lag a moment behind
+// a write, so it is merged in if the server's list doesn't include it yet.
+async function loadFetchList(justSaved) {
   fetchIndex = await getJson("/api/fetches");
+  if (justSaved && !fetchIndex.fetches.some((f) => f.id === justSaved.id)) {
+    fetchIndex.fetches = [justSaved, ...fetchIndex.fetches].sort((a, b) => (a.id < b.id ? 1 : -1));
+    if (!justSaved.partial && (!fetchIndex.defaultId || justSaved.id > fetchIndex.defaultId)) fetchIndex.defaultId = justSaved.id;
+  }
   const sel = $("fetch-select");
   sel.length = 0;
+  if (!fetchIndex.fetches.length) sel.add(new Option("No saved fetches yet", ""));
   for (const f of fetchIndex.fetches) {
     let label = `${fmtDateTime(f.fetchedAt)} · ${fmtInt(f.jobCount)} posts`;
     if (f.failedPages) label += ` · ${f.failedPages} page${f.failedPages === 1 ? "" : "s"} failed`;
+    else if (f.stoppedEarly) label += ` · partial (${f.pagesFetched} pages)`;
     if (f.id === fetchIndex.defaultId) label += " (default)";
     sel.add(new Option(label, f.id));
   }
+  sel.disabled = !fetchIndex.fetches.length;
 }
 
 // Shows a saved fetch and records the choice in the URL (?fetch=<id>) so a reload keeps it.
 async function showFetch(id) {
-  const data = id === fetchIndex.defaultId ? await loadDefaultJobs() : await getJson(`/api/fetches/${encodeURIComponent(id)}`);
+  const data = await getJson(`/api/fetches/${encodeURIComponent(id)}`);
   setData(data);
   const url = new URL(location.href);
   if (data.id === fetchIndex.defaultId) url.searchParams.delete("fetch");
@@ -106,21 +102,45 @@ function showRefreshStatus(text, isError = false) {
   $("refresh-status").classList.toggle("error", isError);
 }
 
-async function watchRefresh() {
+// Reads the NDJSON progress stream from POST /api/refresh; resolves with the final "done" or "error" event.
+async function readRefreshStream(res) {
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  let final = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines.filter(Boolean)) {
+      const event = JSON.parse(line);
+      if (event.type === "progress") showRefreshStatus(event.message);
+      if (event.type === "done" || event.type === "error") final = event;
+    }
+  }
+  return final;
+}
+
+async function startRefresh() {
   $("refresh").disabled = true;
   $("refresh").textContent = "Fetching…";
+  showRefreshStatus("Starting…");
   try {
-    let status;
-    do {
-      await new Promise((r) => setTimeout(r, 2000));
-      status = await (await fetch("/api/refresh")).json();
-      if (status.running) showRefreshStatus(status.progress);
-    } while (status.running);
+    const res = await fetch("/api/refresh", { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    // The fetch runs inside this request, so leaving the page mid-fetch may cut it short.
+    const result = await readRefreshStream(res);
+    if (!result) throw new Error("the connection closed before the fetch finished (it may have hit the server's time limit)");
+    if (result.type === "error") throw new Error(result.error);
 
-    if (status.error) return showRefreshStatus(`Fetch failed: ${status.error}`, true);
-    await loadFetchList();
-    await showFetch(status.fetchId);
-    showRefreshStatus(`Saved and showing new fetch with ${fmtInt(state.jobs.length)} postings`);
+    await loadFetchList(result.fetch);
+    await showFetch(result.fetch.id);
+    const note = result.fetch.partial ? ` (partial: ${result.fetch.stoppedEarly || `${result.fetch.failedPages} page(s) failed`})` : "";
+    showRefreshStatus(`Saved and showing new fetch with ${fmtInt(result.fetch.jobCount)} postings${note}`, Boolean(note));
   } catch (err) {
     showRefreshStatus(`Fetch failed: ${err.message}`, true);
   } finally {
@@ -129,34 +149,29 @@ async function watchRefresh() {
   }
 }
 
-async function startRefresh() {
-  showRefreshStatus("Starting…");
-  const res = await fetch("/api/refresh", { method: "POST" });
-  if (!res.ok && res.status !== 409) {
-    const body = await res.json().catch(() => ({}));
-    return showRefreshStatus(`Fetch failed: ${body.error || `HTTP ${res.status}`}`, true);
-  }
-  watchRefresh(); // 409 means a fetch is already running, so just follow that one
+function showEmpty() {
+  state.jobs = [];
+  render();
+  $("sources").textContent = "No saved fetches yet. Use Fetch now to get postings from HiringCafe.";
+  showRefreshStatus("No saved fetches yet. Click Fetch now to get postings.");
 }
 
 async function init() {
   $("refresh").addEventListener("click", startRefresh);
-  // Pick up a fetch started earlier (e.g. before a page reload or from another tab).
-  const status = await (await fetch("/api/refresh")).json().catch(() => ({}));
-  if (status.running) watchRefresh();
 
-  const first = await loadDefaultJobs(); // waits out a first-run fetch, so the list below isn't empty
   await loadFetchList();
   const requested = new URLSearchParams(location.search).get("fetch");
-  if (requested && requested !== first.id) {
+  if (!fetchIndex.fetches.length) {
+    showEmpty();
+  } else if (requested && requested !== fetchIndex.defaultId) {
     try {
       await showFetch(requested);
     } catch (err) {
       showRefreshStatus(`Couldn't load fetch ${requested} (${err.message}); showing the default`, true);
-      await showFetch(first.id);
+      await showFetch(fetchIndex.defaultId);
     }
   } else {
-    await showFetch(first.id);
+    await showFetch(fetchIndex.defaultId);
   }
 
   $("fetch-select").addEventListener("change", async (e) => {

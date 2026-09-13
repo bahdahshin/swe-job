@@ -1,21 +1,23 @@
-// Fetches postings from HiringCafe and saves them as a new entry in data/fetches/.
+// Fetches postings from HiringCafe and saves them as a new entry in the fetch history
+// (Vercel Blob if BLOB_READ_WRITE_TOKEN is set, otherwise data/fetches/).
 // Usage: npm run fetch [-- --pages=40]
-const path = require("path");
-const { fetchAllJobs, saveFetch } = require("../lib/fetch-jobs");
+import { fileURLToPath } from "node:url";
+import { fetchAllJobs } from "../lib/hiringcafe.js";
+import { createStore } from "../lib/store.js";
 
-const FETCHES_DIR = path.join(__dirname, "..", "data", "fetches");
 const pagesArg = process.argv.find((a) => a.startsWith("--pages="));
 const pages = Number(pagesArg?.split("=")[1] || process.env.HIRINGCAFE_PAGES || 25);
+const store = createStore({ dir: fileURLToPath(new URL("../data/fetches", import.meta.url)) });
 
-(async () => {
-  console.log(`Fetching up to ${pages} result pages from HiringCafe...`);
+try {
+  console.log(`Fetching up to ${pages} result pages from HiringCafe (saving to ${store.kind})...`);
   const data = await fetchAllJobs({ pages });
-  const saved = saveFetch(FETCHES_DIR, data);
+  const saved = await store.save(data);
   const withSalary = data.jobs.filter((j) => j.salaryMin).length;
   const withYears = data.jobs.filter((j) => j.yearsExperience !== null).length;
   console.log(`Saved fetch ${saved.id}: ${saved.jobCount} postings (${withSalary} with salary, ${withYears} with years of experience)`);
   if (data.errors.length) console.log(`${data.errors.length} page(s) failed:`, data.errors);
-})().catch((err) => {
+} catch (err) {
   console.error(err.message);
   process.exit(1);
-});
+}
