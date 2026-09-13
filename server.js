@@ -50,7 +50,7 @@ async function refresh() {
     console.log(`Saved fetch ${saved.id} with ${saved.jobCount} postings`);
   } catch (err) {
     refreshState.error = err.message;
-    console.error("Fetch failed:", err.message);
+    console.error("Fetch failed:", err); // full stack, so deploy logs show where it broke
     throw err;
   } finally {
     Object.assign(refreshState, { running: false, finishedAt: new Date().toISOString() });
