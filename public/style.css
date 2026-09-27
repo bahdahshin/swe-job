@@ -99,7 +99,7 @@ figcaption { display: flex; justify-content: space-between; align-items: center;
 .table-head input { min-width: 240px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; vertical-align: top; }
 th { font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; user-select: none; }
 th:hover { color: var(--text-primary); }
 th.sorted::after { content: " ↓"; }
@@ -107,6 +107,7 @@ th.sorted.asc::after { content: " ↑"; }
 td { color: var(--text-secondary); }
 td:first-child { color: var(--text-primary); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+td:nth-child(1), td:nth-child(2), td:nth-child(3) { white-space: normal; max-width: 260px; }
 tbody tr:hover { background: var(--hover); }
 .table-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12px; }
 

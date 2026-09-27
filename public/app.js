@@ -479,7 +479,7 @@ function renderTable(jobs) {
   const q = state.search;
   const { key, asc } = state.sort;
   const rows = jobs
-    .filter((j) => !q || j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q))
+    .filter((j) => !q || j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q) || j.location.toLowerCase().includes(q))
     .sort((a, b) => {
       const av = a[key] ?? "";
       const bv = b[key] ?? "";
