@@ -85,12 +85,13 @@ function setData(data) {
 
   const uniq = (key) => [...new Set(state.jobs.map((j) => j[key]))];
   fillSelect("f-level", uniq("level").sort((a, b) => rank(a) - rank(b)));
-  fillSelect("f-location", uniq("location").sort());
+  fillDatalist("f-location-options", uniq("location").sort());
   fillSelect("f-specialty", uniq("specialty").sort());
   // Drop filters whose value no longer exists in the new data.
-  for (const [id, key] of [["f-level", "level"], ["f-location", "location"], ["f-specialty", "specialty"]]) {
+  for (const [id, key] of [["f-level", "level"], ["f-specialty", "specialty"]]) {
     state.filters[key] = $(id).value;
   }
+  state.filters.location = $("f-location").value;
   state.visibleRows = PAGE_SIZE;
   render();
 }
@@ -195,9 +196,13 @@ async function init() {
       render();
     });
   bind("f-level", "level");
-  bind("f-location", "location");
   bind("f-specialty", "specialty");
   bind("f-days", "days", Number);
+  $("f-location").addEventListener("input", (e) => {
+    state.filters.location = e.target.value;
+    state.visibleRows = PAGE_SIZE;
+    render();
+  });
 
   $("f-reset").addEventListener("click", () => {
     state.filters = { level: "", location: "", specialty: "", days: 0 };
@@ -243,14 +248,22 @@ function fillSelect(id, values) {
   sel.value = values.includes(current) ? current : "";
 }
 
+// Rebuilt on every data load; suggestions only, so the current text (a substring search) is untouched.
+function fillDatalist(id, values) {
+  const list = $(id);
+  list.innerHTML = "";
+  for (const v of values) list.appendChild(new Option(v, v));
+}
+
 function filtered() {
   const { level, location, specialty, days } = state.filters;
+  const locationQuery = location.trim().toLowerCase();
   const latest = state.jobs.reduce((m, j) => (j.postedDate > m ? j.postedDate : m), "");
   const cutoff = days && latest ? new Date(new Date(latest).getTime() - days * 86400000).toISOString().slice(0, 10) : "";
   return state.jobs.filter(
     (j) =>
       (!level || j.level === level) &&
-      (!location || j.location === location) &&
+      (!locationQuery || j.location.toLowerCase().includes(locationQuery)) &&
       (!specialty || j.specialty === specialty) &&
       (!cutoff || j.postedDate >= cutoff)
   );

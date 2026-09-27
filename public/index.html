@@ -26,7 +26,10 @@
 
     <section class="filters" aria-label="Filters">
       <label>Level <select id="f-level"><option value="">All levels</option></select></label>
-      <label>Location <select id="f-location"><option value="">All locations</option></select></label>
+      <label>Location
+        <input id="f-location" type="search" list="f-location-options" placeholder="All locations" autocomplete="off" />
+        <datalist id="f-location-options"></datalist>
+      </label>
       <label>Specialty <select id="f-specialty"><option value="">All specialties</option></select></label>
       <label>Posted
         <select id="f-days">
