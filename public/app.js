@@ -219,6 +219,11 @@ async function init() {
     state.visibleRows += PAGE_SIZE;
     renderTable(filtered());
   });
+  $("sort").addEventListener("change", (e) => {
+    const [key, dir] = e.target.value.split(":");
+    state.sort = { key, asc: dir === "asc" };
+    renderTable(filtered());
+  });
   document.querySelectorAll("th[data-sort]").forEach((th) =>
     th.addEventListener("click", () => {
       const key = th.dataset.sort;
@@ -227,8 +232,17 @@ async function init() {
     })
   );
 
+  // Touch has no hover to end: every tap clears the tooltip first (capture phase, so a tap on a chart can
+  // show a fresh one), and a scroll clears it rather than leaving it pinned in place.
+  document.addEventListener("pointerdown", (evt) => evt.pointerType !== "mouse" && hideTooltip(), true);
+  window.addEventListener("scroll", hideTooltip, { passive: true });
+
+  // Width only: mobile browsers fire resize as the address bar slides in and out while scrolling.
   let resizeTimer;
+  let lastWidth = window.innerWidth;
   window.addEventListener("resize", () => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(render, 120);
   });
@@ -485,13 +499,27 @@ function renderTable(jobs) {
       const bv = b[key] ?? "";
       if (av === "" || bv === "") return (av === "") - (bv === ""); // missing values always last
       const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
-      return asc ? cmp : -cmp;
+      if (cmp) return asc ? cmp : -cmp;
+      return (b.postedDate || "").localeCompare(a.postedDate || ""); // ties: newest first
     });
 
   document.querySelectorAll("th[data-sort]").forEach((th) => {
-    th.classList.toggle("sorted", th.dataset.sort === key);
-    th.classList.toggle("asc", th.dataset.sort === key && asc);
+    const sorted = th.dataset.sort === key;
+    th.classList.toggle("sorted", sorted);
+    th.classList.toggle("asc", sorted && asc);
+    if (sorted) th.setAttribute("aria-sort", asc ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
   });
+  // Keep the "Sort by" menu in step with header clicks; text columns show as a one-off "Title: A–Z" style entry.
+  const sortSel = $("sort");
+  const sortValue = `${key}:${asc ? "asc" : "desc"}`;
+  if ([...sortSel.options].some((o) => o.value === sortValue)) {
+    sortSel.value = sortValue;
+  } else {
+    const custom = sortSel.querySelector('option[value="custom"]');
+    custom.textContent = `${document.querySelector(`th[data-sort="${key}"]`).textContent}: ${asc ? "A–Z" : "Z–A"}`;
+    sortSel.value = "custom";
+  }
 
   const shown = rows.slice(0, state.visibleRows);
   $("rows").innerHTML = shown
@@ -500,9 +528,9 @@ function renderTable(jobs) {
         <td>${escapeHtml(j.title)}</td>
         <td>${escapeHtml(j.company)}</td>
         <td>${escapeHtml(j.location)}</td>
-        <td class="num">${Number.isFinite(j.yearsExperience) ? `${j.yearsExperience}+` : "–"}</td>
-        <td class="num">${j.salaryMin ? `${fmtMoney(j.salaryMin)} – ${fmtMoney(j.salaryMax)}` : "–"}</td>
-        <td class="num">${escapeHtml(j.postedDate)}</td>
+        <td class="num${Number.isFinite(j.yearsExperience) ? "" : " none"}" data-label="Exp">${Number.isFinite(j.yearsExperience) ? `${j.yearsExperience}+` : "–"}</td>
+        <td class="num${j.salaryMin ? "" : " none"}">${j.salaryMin ? `${fmtMoney(j.salaryMin)} – ${fmtMoney(j.salaryMax)}` : "–"}</td>
+        <td class="num" data-label="Posted">${escapeHtml(j.postedDate)}</td>
         <td>${j.url ? `<a href="${escapeHtml(j.url)}" target="_blank" rel="noopener noreferrer">View post ↗</a>` : '<span class="muted">No link</span>'}</td>
       </tr>`
     )
@@ -540,22 +568,48 @@ function tip(title, rows) {
     rows.map(([k, v]) => `<div class="tt-row"><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
-function hoverable(node, content, onLeave) {
+let activeLeave = null; // onLeave of the element whose tooltip is showing
+
+function hideTooltip() {
+  $("tooltip").hidden = true;
+  if (activeLeave) activeLeave();
+  activeLeave = null;
+}
+
+// Mouse: the tooltip follows the pointer. Touch: a tap shows it above the finger and a sideways drag scrubs;
+// the next tap elsewhere or a scroll hides it (see init).
+function hoverable(node, content, onLeave = () => {}) {
   const tooltip = $("tooltip");
-  node.addEventListener("mousemove", (evt) => {
+  const show = (evt) => {
+    if (activeLeave !== onLeave) {
+      if (activeLeave) activeLeave();
+      activeLeave = onLeave;
+    }
     tooltip.innerHTML = content(evt);
     tooltip.hidden = false;
     const { width, height } = tooltip.getBoundingClientRect();
-    let left = evt.clientX + 14;
-    let top = evt.clientY + 14;
-    if (left + width > window.innerWidth - 8) left = evt.clientX - width - 14;
-    if (top + height > window.innerHeight - 8) top = evt.clientY - height - 14;
+    let left, top;
+    if (evt.pointerType === "mouse") {
+      left = evt.clientX + 14;
+      top = evt.clientY + 14;
+      if (left + width > window.innerWidth - 8) left = evt.clientX - width - 14;
+      if (top + height > window.innerHeight - 8) top = evt.clientY - height - 14;
+    } else {
+      left = Math.min(Math.max(8, evt.clientX - width / 2), window.innerWidth - width - 8);
+      top = evt.clientY - height - 24;
+      if (top < 8) top = evt.clientY + 24;
+    }
     tooltip.style.left = left + "px";
     tooltip.style.top = top + "px";
+  };
+  node.addEventListener("pointermove", show);
+  node.addEventListener("pointerdown", (evt) => {
+    // A touch is captured by the element it starts on; release it so a drag moves across the bars.
+    if (node.hasPointerCapture(evt.pointerId)) node.releasePointerCapture(evt.pointerId);
+    show(evt);
   });
-  node.addEventListener("mouseleave", () => {
-    tooltip.hidden = true;
-    if (onLeave) onLeave();
+  node.addEventListener("pointerleave", (evt) => {
+    if (evt.pointerType === "mouse") hideTooltip();
   });
 }
 
