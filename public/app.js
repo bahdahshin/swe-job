@@ -138,10 +138,20 @@ async function startRefresh() {
     if (!result) throw new Error("the connection closed before the fetch finished (it may have hit the server's time limit)");
     if (result.type === "error") throw new Error(result.error);
 
+    const previousFetchId = $("fetch-select").value;
     await loadFetchList(result.fetch);
-    await showFetch(result.fetch.id);
-    const note = result.fetch.partial ? ` (partial: ${result.fetch.stoppedEarly || `${result.fetch.failedPages} page(s) failed`})` : "";
-    showRefreshStatus(`Saved and showing new fetch with ${fmtInt(result.fetch.jobCount)} postings${note}`, Boolean(note));
+    if (result.fetch.partial) {
+      const reason = result.fetch.stoppedEarly || `${result.fetch.failedPages} page(s) failed`;
+      if (state.jobs.length) {
+        $("fetch-select").value = previousFetchId;
+      } else {
+        await showFetch(result.fetch.id);
+      }
+      showRefreshStatus(`Saved partial fetch with ${fmtInt(result.fetch.jobCount)} postings: ${reason}. ${state.jobs.length && $("fetch-select").value !== result.fetch.id ? "Kept current results. Select the partial fetch in history to view it." : "Showing available results."}`, true);
+    } else {
+      await showFetch(result.fetch.id);
+      showRefreshStatus(`Saved and showing new fetch with ${fmtInt(result.fetch.jobCount)} postings`);
+    }
   } catch (err) {
     showRefreshStatus(`Fetch failed: ${err.message}`, true);
   } finally {
