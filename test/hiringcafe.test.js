@@ -72,3 +72,13 @@ test("persistent rate limiting exhausts bounded retries and closes session", asy
   assert.equal(data.pagesFetched, 0);
   assert.equal(f.closed, true);
 });
+
+test("blocked requests stop immediately with an actionable local-fetch instruction", async () => {
+  const f = fixture([403]);
+  const data = await fetchAllJobs({ log: () => {} }, f.runtime);
+  assert.deepEqual(f.requests, [0]);
+  assert.deepEqual(f.waits, []);
+  assert.equal(data.errors[0].blocked, true);
+  assert.match(data.stoppedEarly, /npm run fetch/);
+  assert.equal(f.closed, true);
+});

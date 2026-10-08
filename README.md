@@ -49,7 +49,7 @@ Salary (annual USD) and minimum years of experience come from HiringCafe's readi
 
 **Fetch now** runs the whole fetch inside its request and streams progress to the page. It stops starting new pages after 240 seconds (`HIRINGCAFE_TIME_BUDGET_MS`) and saves what it has, so it stays under Vercel's default 300-second function limit. A fetch cut short that way is marked partial and isn't used as the default. Keep the page open until it finishes.
 
-If HiringCafe blocks Vercel's IP addresses, **Fetch now** says so ("blocked by HiringCafe's bot protection"). In that case, fetch on your own machine with `npm run fetch` while `BLOB_READ_WRITE_TOKEN` is set (e.g. `node --env-file=.env.local scripts/fetch-jobs.js`), and the result appears on the deployed site.
+If HiringCafe blocks the deployed server's requests (HTTP 403), retries cannot resolve that block. Fetch on your own machine instead: put the deployed project's `BLOB_READ_WRITE_TOKEN` in `.env.local`, then run `npm run fetch`. The command automatically loads `.env.local` and saves directly to that Blob store, so the result appears in the deployed site's fetch history after reloading. Without Blob credentials, it saves only to local `data/fetches/`.
 
 ## API
 

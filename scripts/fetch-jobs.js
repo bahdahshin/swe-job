@@ -16,6 +16,10 @@ try {
   const withSalary = data.jobs.filter((j) => j.salaryMin).length;
   const withYears = data.jobs.filter((j) => j.yearsExperience !== null).length;
   console.log(`Saved fetch ${saved.id}: ${saved.jobCount} postings (${withSalary} with salary, ${withYears} with years of experience)`);
+  if (saved.partial) {
+    console.warn(`Partial fetch: ${data.stoppedEarly || `${data.errors.length} page(s) failed`}. The newest complete fetch remains the default.`);
+    process.exitCode = 2;
+  }
   if (data.errors.length) console.log(`${data.errors.length} page(s) failed:`, data.errors);
 } catch (err) {
   console.error(err.message);
