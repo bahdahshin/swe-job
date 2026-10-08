@@ -47,7 +47,9 @@ Salary (annual USD) and minimum years of experience come from HiringCafe's readi
    npm run upload-fetches
    ```
 
-**Fetch now** runs the whole fetch inside its request and streams progress to the page. It stops starting new pages after 240 seconds (`HIRINGCAFE_TIME_BUDGET_MS`) and saves what it has, so it stays under Vercel's default 300-second function limit. A fetch cut short that way is marked partial and isn't used as the default. Keep the page open until it finishes.
+**Fetch now** streams progress to the page. Each request stops starting new pages after 240 seconds (`HIRINGCAFE_TIME_BUDGET_MS`) and saves its progress. If rate limiting or the time budget interrupts it, the page waits for the cooldown and continues from the first unfinished page in another request. Each checkpoint is saved separately in history; previous snapshots remain available. Once it finishes the requested pages, the complete result becomes the default. Keep the page open while fetching.
+
+After a reload, **Resume fetch** continues the latest unfinished fetch if it is newer than the latest complete result. One click makes at most eight requests and pauses after three requests with no page progress, so persistent rate limits do not cause an endless loop. A 403 block cannot be resumed this way. Older partial snapshots can resume when their saved page counts show exactly where collection stopped.
 
 If HiringCafe blocks the deployed server's requests (HTTP 403), retries cannot resolve that block. Fetch on your own machine instead: put the deployed project's `BLOB_READ_WRITE_TOKEN` in `.env.local`, then run `npm run fetch`. The command automatically loads `.env.local` and saves directly to that Blob store, so the result appears in the deployed site's fetch history after reloading. Without Blob credentials, it saves only to local `data/fetches/`.
 
@@ -56,4 +58,4 @@ If HiringCafe blocks the deployed server's requests (HTTP 403), retries cannot r
 - `GET /api/jobs`: the default fetch (404 if there are none yet)
 - `GET /api/fetches`: storage type and a summary of every saved fetch, newest first
 - `GET /api/fetches/<id>`: one saved fetch
-- `POST /api/refresh`: run a new fetch; the response streams newline-delimited JSON (`progress` events, then `done` with the saved fetch's summary, or `error`)
+- `POST /api/refresh`: run a new fetch; the response streams newline-delimited JSON (`progress` events, then `done` with the saved fetch's summary, or `error`). `POST /api/refresh?resume=<id>` continues a saved partial fetch. A resumable summary includes `continuation` with `nextPage`, `retryAt` (cooldown time), and `delayMs` (request pacing).

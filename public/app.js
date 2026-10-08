@@ -43,6 +43,14 @@ async function getJson(url) {
 // ---- fetch history -----------------------------------------------------------
 
 let fetchIndex = { defaultId: null, fetches: [] };
+let pendingRefresh = null;
+let refreshRunning = false;
+
+function updateRefreshButton() {
+  if (refreshRunning) return;
+  $("refresh").disabled = false;
+  $("refresh").textContent = pendingRefresh ? "Resume fetch" : "Fetch now";
+}
 
 // `justSaved` is a summary returned by a fetch that just finished: Blob listings can lag a moment behind
 // a write, so it is merged in if the server's list doesn't include it yet.
@@ -63,6 +71,11 @@ async function loadFetchList(justSaved) {
     sel.add(new Option(label, f.id));
   }
   sel.disabled = !fetchIndex.fetches.length;
+  const newestComplete = fetchIndex.fetches.filter((f) => !f.partial).sort((a, b) => b.id.localeCompare(a.id))[0];
+  pendingRefresh = fetchIndex.fetches
+    .filter((f) => f.partial && f.continuation && (!newestComplete || f.id > newestComplete.id))
+    .sort((a, b) => b.id.localeCompare(a.id))[0] || null;
+  updateRefreshButton();
 }
 
 // Shows a saved fetch and records the choice in the URL (?fetch=<id>) so a reload keeps it.
@@ -108,55 +121,109 @@ async function readRefreshStream(res) {
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   let final = null;
+  const readLine = (line) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === "progress") showRefreshStatus(event.message);
+    if (event.type === "done" || event.type === "error") final = event;
+  };
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += value;
     const lines = buffer.split("\n");
     buffer = lines.pop();
-    for (const line of lines.filter(Boolean)) {
-      const event = JSON.parse(line);
-      if (event.type === "progress") showRefreshStatus(event.message);
-      if (event.type === "done" || event.type === "error") final = event;
-    }
+    for (const line of lines) readLine(line);
   }
+  readLine(buffer);
   return final;
 }
 
+function fetchedPages(summary) {
+  return summary?.pagesFetched ?? summary?.continuation?.nextPage ?? 0;
+}
+
+function partialProgress(summary) {
+  const pages = summary.pagesRequested
+    ? `${fetchedPages(summary)} of ${summary.pagesRequested} pages`
+    : `${fetchedPages(summary)} pages`;
+  return `Saved ${fmtInt(summary.jobCount)} postings (${pages}).`;
+}
+
+async function waitForContinuation(summary) {
+  const retryAt = Date.parse(summary.continuation.retryAt);
+  const deadline = Number.isFinite(retryAt)
+    ? retryAt
+    : Date.now() + Math.max(0, summary.continuation.delayMs || 0);
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    $("refresh").textContent = "Waiting…";
+    showRefreshStatus(`${partialProgress(summary)} Rate limited; continuing in ${Math.ceil(remaining / 1000)}s…`);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1000, remaining)));
+  }
+}
+
 async function startRefresh() {
+  if (refreshRunning) return;
+  refreshRunning = true;
   $("refresh").disabled = true;
   $("refresh").textContent = "Fetching…";
-  showRefreshStatus("Starting…");
+  let resume = pendingRefresh;
+  let previousPages = fetchedPages(resume);
+  let stalledAttempts = 0;
+  showRefreshStatus(resume ? "Resuming saved fetch…" : "Starting…");
   try {
-    const res = await fetch("/api/refresh", { method: "POST" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `HTTP ${res.status}`);
-    }
-    // The fetch runs inside this request, so leaving the page mid-fetch may cut it short.
-    const result = await readRefreshStream(res);
-    if (!result) throw new Error("the connection closed before the fetch finished (it may have hit the server's time limit)");
-    if (result.type === "error") throw new Error(result.error);
+    for (let request = 0; request < 8; request++) {
+      if (resume) await waitForContinuation(resume);
+      $("refresh").textContent = "Fetching…";
+      const url = resume ? `/api/refresh?resume=${encodeURIComponent(resume.id)}` : "/api/refresh";
+      const res = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      // The fetch runs inside this request, so leaving the page mid-fetch may cut it short.
+      const result = await readRefreshStream(res);
+      if (!result) throw new Error("the connection closed before the fetch finished (it may have hit the server's time limit)");
+      if (result.type === "error") throw new Error(result.error);
 
-    const previousFetchId = $("fetch-select").value;
-    await loadFetchList(result.fetch);
-    if (result.fetch.partial) {
-      const reason = result.fetch.stoppedEarly || `${result.fetch.failedPages} page(s) failed`;
-      if (state.jobs.length) {
+      const previousFetchId = $("fetch-select").value;
+      // Keep the newest checkpoint available even if reloading history fails after a successful save.
+      pendingRefresh = result.fetch.partial && result.fetch.continuation ? result.fetch : null;
+      await loadFetchList(result.fetch);
+      if (!result.fetch.partial) {
+        await showFetch(result.fetch.id);
+        showRefreshStatus(`Saved and showing new fetch with ${fmtInt(result.fetch.jobCount)} postings`);
+        return;
+      }
+      // History includes the new snapshot, but displayed results stay on the selected fetch.
+      if (previousFetchId) {
         $("fetch-select").value = previousFetchId;
       } else {
-        await showFetch(result.fetch.id);
+        $("fetch-select").value = "";
       }
-      showRefreshStatus(`Saved partial fetch with ${fmtInt(result.fetch.jobCount)} postings: ${reason}. ${state.jobs.length && $("fetch-select").value !== result.fetch.id ? "Kept current results. Select the partial fetch in history to view it." : "Showing available results."}`, true);
-    } else {
-      await showFetch(result.fetch.id);
-      showRefreshStatus(`Saved and showing new fetch with ${fmtInt(result.fetch.jobCount)} postings`);
+      if (!result.fetch.continuation) {
+        const reason = result.fetch.stoppedEarly || `${result.fetch.failedPages} page(s) failed`;
+        showRefreshStatus(`Saved partial fetch with ${fmtInt(result.fetch.jobCount)} postings: ${reason}. Kept current results. Select the partial fetch in history to view it.`, true);
+        return;
+      }
+
+      resume = result.fetch;
+      pendingRefresh = resume;
+      const pages = fetchedPages(resume);
+      stalledAttempts = pages > previousPages ? 0 : stalledAttempts + 1;
+      previousPages = pages;
+      if (stalledAttempts >= 3 || request === 7) {
+        showRefreshStatus(`${partialProgress(resume)} ${stalledAttempts >= 3 ? "HiringCafe is still rate limiting this fetch." : "Automatic continuation paused."} Kept current results. Click Resume fetch to continue.`, true);
+        return;
+      }
     }
   } catch (err) {
     showRefreshStatus(`Fetch failed: ${err.message}`, true);
   } finally {
-    $("refresh").disabled = false;
-    $("refresh").textContent = "Fetch now";
+    refreshRunning = false;
+    updateRefreshButton();
   }
 }
 
@@ -164,7 +231,7 @@ function showEmpty() {
   state.jobs = [];
   render();
   $("sources").textContent = "No saved fetches yet. Use Fetch now to get postings from HiringCafe.";
-  showRefreshStatus("No saved fetches yet. Click Fetch now to get postings.");
+  showRefreshStatus(pendingRefresh ? "A partial fetch is saved. Click Resume fetch to continue." : "No saved fetches yet. Click Fetch now to get postings.");
 }
 
 async function init() {

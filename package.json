@@ -5,6 +5,7 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
+    "test": "node --test",
     "start": "node server.js",
     "fetch": "node --env-file-if-exists=.env.local scripts/fetch-jobs.js",
     "upload-fetches": "node --env-file-if-exists=.env.local scripts/upload-fetches.js"

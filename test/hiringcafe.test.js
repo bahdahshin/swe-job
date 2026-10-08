@@ -23,7 +23,7 @@ function fixture(statuses) {
             headers: new Headers({ "retry-after": "0" }),
             text: async () => status === 200
               ? '<script id="__NEXT_DATA__">' + JSON.stringify({ props: { pageProps: {
-                ssrHits: [{ id: "job", job_information: { title: "Software Engineer" },
+                ssrHits: [{ id: "job", strict_dedup_cluster_id: "cluster", job_information: { title: "Software Engineer" },
                   v5_processed_job_data: { workplace_countries: ["US"] } }],
                 ssrTotalCount: 100,
               } } }) + '</script>' : '',
@@ -81,4 +81,43 @@ test("blocked requests stop immediately with an actionable local-fetch instructi
   assert.equal(data.errors[0].blocked, true);
   assert.match(data.stoppedEarly, /npm run fetch/);
   assert.equal(f.closed, true);
+});
+
+test("a resumed fetch starts at the failed page and clears recovered errors", async () => {
+  const first = fixture([200, 429]);
+  const partial = await fetchAllJobs({ pages: 3, timeBudgetMs: 45000, log: () => {} }, first.runtime);
+  assert.equal(partial.continuation.nextPage, 1);
+  assert.equal(partial.jobs[0].dedupClusterId, "cluster");
+  const second = fixture([200, 200]);
+  const completed = await fetchAllJobs({ resume: { ...partial, id: "snapshot" }, log: () => {} }, second.runtime);
+  assert.deepEqual(second.requests, [1, 2]);
+  assert.equal(completed.pagesFetched, 3);
+  assert.equal(completed.jobs.length, 1);
+  assert.deepEqual(completed.errors, []);
+  assert.equal(completed.stoppedEarly, null);
+  assert.equal(completed.continuation, null);
+  assert.equal(completed.resumedFrom, "snapshot");
+  assert.deepEqual(second.waits, [20000, 10000]);
+});
+
+test("time budget after a successful page saves the next cursor", async () => {
+  const f = fixture([200]);
+  const data = await fetchAllJobs({ pages: 3, timeBudgetMs: 34000, log: () => {} }, f.runtime);
+  assert.deepEqual(f.requests, [0]);
+  assert.equal(data.continuation.nextPage, 1);
+  assert.equal(data.continuation.retryAt, null);
+  assert.equal(data.pagesFetched, 1);
+});
+
+test("cooldown too long for a request returns existing progress without contacting HiringCafe", async () => {
+  const f = fixture([]);
+  const resume = {
+    query: "software engineer", jobs: [{ id: "old" }], pagesFetched: 1, pagesRequested: 3,
+    continuation: { nextPage: 1, retryAt: new Date(60000).toISOString(), delayMs: 10000 },
+  };
+  const data = await fetchAllJobs({ resume, timeBudgetMs: 45000, log: () => {} }, f.runtime);
+  assert.deepEqual(f.requests, []);
+  assert.deepEqual(f.waits, []);
+  assert.equal(data.jobs.length, 1);
+  assert.equal(data.continuation.nextPage, 1);
 });

@@ -9,7 +9,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchAllJobs } from "./lib/hiringcafe.js";
+import { createRefreshHandler } from "./lib/refresh.js";
 import { createStore, defaultFetch } from "./lib/store.js";
 
 // Written as `new URL(..., import.meta.url)` so Vercel's file tracing copies these folders into the function.
@@ -43,41 +43,7 @@ async function listFetches() {
   return { storage: store.kind, defaultId: defaultFetch(fetches)?.id || null, fetches };
 }
 
-let refreshRunning = false; // only guards this instance; another instance could still start a fetch
-
-// Streams newline-delimited JSON: {type:"progress",message} lines, then {type:"done",fetch} or {type:"error",error}.
-async function streamRefresh(req, res) {
-  if (refreshRunning) return sendJson(res, 409, { error: "A fetch is already running" });
-  if (store.saveBlocker) return sendJson(res, 503, { error: store.saveBlocker }); // don't spend minutes fetching what can't be saved
-  refreshRunning = true;
-  res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
-  const send = (event) => {
-    if (!res.destroyed) res.write(JSON.stringify(event) + "\n");
-  };
-  const heartbeat = setInterval(() => send({ type: "ping" }), 15000); // keeps the connection busy during rate-limit waits
-  try {
-    send({ type: "progress", message: `Starting (up to ${PAGES} pages)…` });
-    const data = await fetchAllJobs({
-      pages: PAGES,
-      timeBudgetMs: TIME_BUDGET_MS,
-      log: (line) => {
-        console.log(line);
-        send({ type: "progress", message: line.trim() });
-      },
-    });
-    send({ type: "progress", message: `Saving ${data.jobs.length} postings…` });
-    const summary = await store.save(data);
-    console.log(`Saved fetch ${summary.id} with ${summary.jobCount} postings (${store.kind})`);
-    send({ type: "done", fetch: summary });
-  } catch (err) {
-    console.error("Fetch failed:", err); // full stack, so deploy logs show where it broke
-    send({ type: "error", error: err.message });
-  } finally {
-    clearInterval(heartbeat);
-    refreshRunning = false;
-    res.end();
-  }
-}
+const streamRefresh = createRefreshHandler({ store, pages: PAGES, timeBudgetMs: TIME_BUDGET_MS });
 
 async function handleApi(req, res, url) {
   // The default fetch (newest complete one).
